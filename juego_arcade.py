@@ -19,11 +19,13 @@ AMMO_COOLDOWN = {"parabolic": 760, "conic": 1180}
 PLAYER_DAMAGE = {1: 1, 2: 2, 3: 3, "boss": 12}
 
 ENEMY_SETTINGS = {
-    1: {"amplitude": 30, "frequency": 1.08, "phase": 0.15, "speed": 122, "hp": 3, "stop_x": MAP_RECT.left + 268},
-    2: {"amplitude": 41, "frequency": 1.39, "phase": 0.83, "speed": 100, "hp": 6, "stop_x": MAP_RECT.left + 340},
-    3: {"amplitude": 53, "frequency": 1.72, "phase": 1.57, "speed": 86, "hp": 9, "stop_x": MAP_RECT.left + 405},
-    "boss": {"amplitude": 68, "frequency": 0.77, "phase": 2.21, "speed": 54, "hp": 18, "stop_x": MAP_RECT.left + 692},
+    1: {"amplitude": 30, "frequency": 1.08, "phase": 0.15, "speed": 122, "hp": 3},
+    2: {"amplitude": 41, "frequency": 1.39, "phase": 0.83, "speed": 100, "hp": 6},
+    3: {"amplitude": 53, "frequency": 1.72, "phase": 1.57, "speed": 86, "hp": 9},
+    "boss": {"amplitude": 68, "frequency": 0.77, "phase": 2.21, "speed": 54, "hp": 18},
 }
+
+ENEMY_LEFT_MARGIN = {1: 35, 2: 34, 3: 32, "boss": 60}
 
 WAVES = [
     [1, 1, 1, 1],
@@ -47,8 +49,8 @@ class Player:
         return pygame.Rect(round(self.x - 17), round(self.y - 15), 36, 30)
 
     def move(self, keys, dt):
-        dx = int(keys[pygame.K_RIGHT]) - int(keys[pygame.K_LEFT])
-        dy = int(keys[pygame.K_DOWN]) - int(keys[pygame.K_UP])
+        dx = int(keys[pygame.K_RIGHT] or keys[pygame.K_d]) - int(keys[pygame.K_LEFT] or keys[pygame.K_a])
+        dy = int(keys[pygame.K_DOWN] or keys[pygame.K_s]) - int(keys[pygame.K_UP] or keys[pygame.K_w])
         if dx and dy:
             scale = 1 / math.sqrt(2)
             dx *= scale
@@ -69,7 +71,7 @@ class Player:
 
 
 class Enemy:
-    def __init__(self, kind, serial, spawn_offset=0):
+    def __init__(self, kind, serial, spawn_offset=0, target_y=MAP_RECT.centery):
         self.kind = kind
         settings = ENEMY_SETTINGS[kind]
         self.serial = serial
@@ -79,11 +81,16 @@ class Enemy:
         self.speed = settings["speed"]
         self.max_hp = settings["hp"]
         self.hp = self.max_hp
-        self.stop_x = settings["stop_x"]
+        self.left_limit = MAP_RECT.left + ENEMY_LEFT_MARGIN[kind]
+        self.right_limit = MAP_RECT.right - ENEMY_LEFT_MARGIN[kind]
+        self.entered_map = False
+        self.direction = -1
         half_height = 55 if kind == "boss" else 27
         low = MAP_RECT.top + half_height + self.A
         high = MAP_RECT.bottom - half_height - self.A
-        self.D = random.randint(round(low), round(high)) + serial * 0.137
+        self.min_D = low
+        self.max_D = high
+        self.D = max(low, min(high, target_y))
         self.x = MAP_RECT.right + 45 + spawn_offset
         self.y = self.D
         self.elapsed = 0.0
@@ -99,7 +106,20 @@ class Enemy:
 
     def update(self, dt):
         self.elapsed += dt
-        self.x = max(self.stop_x, self.x - self.speed * dt)
+
+        if not self.entered_map:
+            self.x = max(self.right_limit, self.x - self.speed * dt)
+            if self.x <= self.right_limit:
+                self.entered_map = True
+        else:
+            self.x += self.direction * self.speed * dt
+            if self.x <= self.left_limit:
+                self.x = self.left_limit
+                self.direction = 1
+            elif self.x >= self.right_limit:
+                self.x = self.right_limit
+                self.direction = -1
+
         self.y = self.A * math.sin(self.B * self.elapsed + self.C) + self.D
 
     def draw(self, screen, font_small):
@@ -250,7 +270,7 @@ def draw_hud(screen, font, font_small, game, now):
     else:
         ready = "LISTA"
     screen.blit(font_small.render(ready, True, (187, 208, 226)), (565, 43))
-    guide = "FLECHAS: MOVER    ESPACIO: DISPARAR    1: BÁSICA    2: PARABÓLICA    3: CÓNICA"
+    guide = "FLECHAS / WASD: MOVER    ESPACIO: DISPARAR    1: BÁSICA    2: PARABÓLICA    3: CÓNICA"
     guide_surface = font_small.render(guide, True, (167, 189, 216))
     screen.blit(guide_surface, (WIDTH // 2 - guide_surface.get_width() // 2, HEIGHT - 53))
 
@@ -312,13 +332,13 @@ def main():
                 plan = WAVES[wave]
                 if wave == 3:
                     for index, kind in enumerate(plan):
-                        game["enemies"].append(Enemy(kind, game["serial"], index * 82))
+                        game["enemies"].append(Enemy(kind, game["serial"], index * 82, player.y))
                         game["serial"] += 1
                     game["spawn_index"] = len(plan)
                     game["next_spawn"] = now + 10**9
                 elif game["spawn_index"] < len(plan):
                     kind = plan[game["spawn_index"]]
-                    game["enemies"].append(Enemy(kind, game["serial"]))
+                    game["enemies"].append(Enemy(kind, game["serial"], target_y=player.y))
                     game["serial"] += 1
                     game["spawn_index"] += 1
                     game["next_spawn"] = now + 1150
