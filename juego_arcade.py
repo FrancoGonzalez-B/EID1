@@ -35,6 +35,21 @@ WAVES = [
 ]
 
 
+def choose_enemy_height(low, high, target_y, used_heights):
+    lower = math.ceil(low)
+    upper = math.floor(high)
+    target = max(lower, min(upper, round(target_y)))
+
+    for distance in range(upper - lower + 1):
+        candidates = (target,) if distance == 0 else (target - distance, target + distance)
+        for candidate in candidates:
+            if lower <= candidate <= upper and candidate not in used_heights:
+                used_heights.add(candidate)
+                return candidate
+
+    raise ValueError("No quedan alturas disponibles para enemigos")
+
+
 class Player:
     def __init__(self):
         self.x = MAP_RECT.left + 56
@@ -49,8 +64,8 @@ class Player:
         return pygame.Rect(round(self.x - 17), round(self.y - 15), 36, 30)
 
     def move(self, keys, dt):
-        dx = int(keys[pygame.K_RIGHT] or keys[pygame.K_d]) - int(keys[pygame.K_LEFT] or keys[pygame.K_a])
-        dy = int(keys[pygame.K_DOWN] or keys[pygame.K_s]) - int(keys[pygame.K_UP] or keys[pygame.K_w])
+        dx = int(keys[pygame.K_RIGHT]) - int(keys[pygame.K_LEFT])
+        dy = int(keys[pygame.K_DOWN]) - int(keys[pygame.K_UP])
         if dx and dy:
             scale = 1 / math.sqrt(2)
             dx *= scale
@@ -71,7 +86,7 @@ class Player:
 
 
 class Enemy:
-    def __init__(self, kind, serial, spawn_offset=0, target_y=MAP_RECT.centery):
+    def __init__(self, kind, serial, spawn_offset=0, target_y=MAP_RECT.centery, used_heights=None):
         self.kind = kind
         settings = ENEMY_SETTINGS[kind]
         self.serial = serial
@@ -85,12 +100,14 @@ class Enemy:
         self.right_limit = MAP_RECT.right - ENEMY_LEFT_MARGIN[kind]
         self.entered_map = False
         self.direction = -1
-        half_height = 55 if kind == "boss" else 27
+        half_height = 55 if kind == "boss" else (32 if kind == 3 else 27)
         low = MAP_RECT.top + half_height + self.A
         high = MAP_RECT.bottom - half_height - self.A
         self.min_D = low
         self.max_D = high
-        self.D = max(low, min(high, target_y))
+        if used_heights is None:
+            used_heights = set()
+        self.D = choose_enemy_height(low, high, target_y, used_heights)
         self.x = MAP_RECT.right + 45 + spawn_offset
         self.y = self.D
         self.elapsed = 0.0
@@ -227,6 +244,7 @@ def make_round(now):
     return {
         "player": Player(),
         "enemies": [],
+        "used_enemy_heights": set(),
         "projectiles": [],
         "wave": 0,
         "spawn_index": 0,
@@ -270,7 +288,7 @@ def draw_hud(screen, font, font_small, game, now):
     else:
         ready = "LISTA"
     screen.blit(font_small.render(ready, True, (187, 208, 226)), (565, 43))
-    guide = "FLECHAS / WASD: MOVER    ESPACIO: DISPARAR    1: BÁSICA    2: PARABÓLICA    3: CÓNICA"
+    guide = "FLECHAS: MOVER    ESPACIO: DISPARAR    1: BÁSICA    2: PARABÓLICA    3: CÓNICA"
     guide_surface = font_small.render(guide, True, (167, 189, 216))
     screen.blit(guide_surface, (WIDTH // 2 - guide_surface.get_width() // 2, HEIGHT - 53))
 
@@ -332,13 +350,13 @@ def main():
                 plan = WAVES[wave]
                 if wave == 3:
                     for index, kind in enumerate(plan):
-                        game["enemies"].append(Enemy(kind, game["serial"], index * 82, player.y))
+                        game["enemies"].append(Enemy(kind, game["serial"], index * 82, player.y, game["used_enemy_heights"]))
                         game["serial"] += 1
                     game["spawn_index"] = len(plan)
                     game["next_spawn"] = now + 10**9
                 elif game["spawn_index"] < len(plan):
                     kind = plan[game["spawn_index"]]
-                    game["enemies"].append(Enemy(kind, game["serial"], target_y=player.y))
+                    game["enemies"].append(Enemy(kind, game["serial"], target_y=player.y, used_heights=game["used_enemy_heights"]))
                     game["serial"] += 1
                     game["spawn_index"] += 1
                     game["next_spawn"] = now + 1150
